@@ -1,0 +1,1578 @@
+# Load necessary packages
+LoadPackage("sla");
+LoadPackage("corelg");
+
+# 1. Get automorphism and orbit
+GetAutomorphismAndOrbit := function(type, rank, theta_choice, orbit_index)
+    local aut_list, theta, L, orbits, orbit;
+    Print("=== Starting stabilizer calculation (automorphism ", theta_choice, ", orbit ", orbit_index, ") ===\n");
+    aut_list := FiniteOrderInnerAutomorphisms(type, rank, 2);
+
+    if Length(aut_list) = 0 then
+        Print("Error: No second-order inner automorphisms found\n");
+        return fail;
+    fi;
+
+    if theta_choice > Length(aut_list) then
+        Print("Error: Automorphism index out of range\n");
+        return fail;
+    fi;
+    theta := aut_list[theta_choice];
+    L := Source(theta);
+    
+    orbits := NilpotentOrbitsOfThetaRepresentation(theta);
+    if orbit_index > Length(orbits) then
+        Print("Error: Orbit index out of range\n");
+        return fail;
+    fi;
+    
+    orbit := orbits[orbit_index];
+    
+    return rec(
+        theta := theta,
+        L := L,
+        x := orbit[2],
+        e := orbit[3],
+        f := orbit[1]
+    );
+end;
+
+
+# 2. Build standard root system with lattice structures
+BuildStandardRootSystem := function(L, rank, type_str, orbit_index)
+    local R, cartan_matrix, positive_roots, simple_roots, negative_roots, all_roots,
+          alpha_labels, r, root_str, coeff, i, j, k, m,
+          coroot_basis, weight_basis, coweight_basis,
+          weight_matrix, coweight_matrix, root_coeff_in_simple_basis, 
+          verification_ok, temp, coroot_labels, weight_labels, coweight_labels,
+          basis_weight_space, weight_space_basis_vectors, coroot_str, 
+          weight_str, coweight_str, expected_val, identity_mat,
+          simple_roots_in_weight_basis, root_coeff_in_weight_basis,
+          coroot_in_weight_basis, coweight_in_weight_basis,
+          omega_labels, coroot_simple_coords, coweight_simple_coords,
+          root_lengths, coroot_scaling_factors, algebra_type,
+          inner_product_matrix, root_norms, coroot_norms, alpha_i_coord_k, 
+          root_simple_coordinates, v_weight, v_simple;
+    
+    R := RootSystem(L);
+    cartan_matrix := CartanMatrix(R);
+    positive_roots := PositiveRoots(R);
+    simple_roots := positive_roots{[1..rank]};
+    negative_roots := NegativeRoots(R);
+    all_roots := Concatenation(positive_roots, negative_roots);
+    
+    alpha_labels := List([1..rank], i -> Concatenation("α_", String(i)));
+    omega_labels := List([1..rank], i -> Concatenation("ω_", String(i)));
+    
+    if orbit_index=1 then
+        Print("\n=== Bourbaki Convention: Simple Roots in Weight Basis ===\n");
+    fi;
+
+    #α_i = ∑ C_ij ω_j
+    identity_mat := IdentityMat(rank);
+    
+    simple_roots_in_weight_basis := [];
+    for i in [1..rank] do
+        simple_roots_in_weight_basis[i] := cartan_matrix[i];
+    od;
+    
+    if orbit_index=1 then
+        Print("Simple roots expressed in weight basis (α_i = Σ C_ij ω_j):\n");
+    fi;
+
+    for i in [1..rank] do
+        root_str := "";
+        for j in [1..rank] do
+            coeff := simple_roots_in_weight_basis[i][j];
+            if coeff <> 0 then
+                if root_str <> "" and coeff > 0 then Append(root_str, "+"); fi;
+                if coeff < 0 then Append(root_str, "-"); coeff := -coeff; fi;
+                if coeff = 1 then
+                    Append(root_str, omega_labels[j]);
+                else
+                    Append(root_str, Concatenation(String(coeff), omega_labels[j]));
+                fi;
+            fi;
+        od;
+        if orbit_index=1 then
+            Print("  α_", i, " = ", root_str, "=", simple_roots[i], "\n");
+        fi;
+    od;
+
+    #ω = C^{-1} α
+    weight_matrix := cartan_matrix^-1;
+    weight_basis := [];
+    weight_labels := [];
+    for i in [1..rank] do
+        weight_basis[i] := List([1..rank], j -> weight_matrix[i][j]);
+        
+        weight_str := "";
+        for j in [1..rank] do
+            coeff := weight_basis[i][j];
+            if coeff <> 0 then
+                if weight_str <> "" and coeff > 0 then Append(weight_str, "+"); fi;
+                if coeff < 0 then Append(weight_str, "-"); coeff := -coeff; fi;
+                if coeff = 1 then
+                    Append(weight_str, alpha_labels[j]);
+                else
+                    Append(weight_str, Concatenation(String(coeff), alpha_labels[j]));
+                fi;
+            fi;
+        od;
+        if weight_str = "" then weight_str := "0"; fi;
+        weight_labels[i] := weight_str;
+    od;
+    
+    if orbit_index=1 then
+        Print("Weight basis in simple root coordinates:\n");
+        for i in [1..rank] do
+            Print("  ω_", i, " = ", weight_basis[i], " = ", weight_labels[i], "\n");
+        od;
+    fi;
+    
+    if type_str = "F" and rank = 4 then
+        root_lengths := [1, 2, 1, 2];  
+        algebra_type := "F4";
+        root_norms := [1, 2, 1, 2];
+    elif type_str = "G" and rank = 2 then
+        root_lengths := [1, 3];  
+        algebra_type := "G2";
+        root_norms := [2, 6];
+    elif type_str = "E" and rank = 6 then
+        root_lengths := [1, 1, 1, 1, 1, 1];  
+        algebra_type := "E6";
+        root_norms := [2, 2, 2, 2, 2, 2];  
+    elif type_str = "E" and rank = 7 then
+        root_lengths := [1, 1, 1, 1, 1, 1, 1];  
+        algebra_type := "E7";
+        root_norms := [2, 2, 2, 2, 2, 2, 2];  
+    elif type_str = "E" and rank = 8 then
+        root_lengths := [1, 1, 1, 1, 1, 1, 1, 1];  
+        algebra_type := "E8";
+        root_norms := [2, 2, 2, 2, 2, 2, 2, 2];  
+    else
+        root_lengths := ListWithIdenticalEntries(rank, 1);
+        algebra_type := "Classical or Unknown";
+        root_norms := ListWithIdenticalEntries(rank, 2);  
+        Print("Warning: Using default equal root lengths for type ", type_str, "\n");
+    fi;
+
+
+    if orbit_index=1 then
+        Print("Actual root squared norms |α_i|^2: ", root_norms, "\n");
+    fi;
+    
+    #α^∨ = (2/(α,α)) α
+    coroot_norms := List([1..rank], i -> 4/root_norms[i]);  # (α^∨, α^∨) = 4/(α,α)
+    coroot_scaling_factors := List(coroot_norms, x -> x/Gcd(coroot_norms));
+    Print("Coroot squared norms: ", coroot_norms, "\n");
+    
+    #(α_i, α_j)
+    inner_product_matrix := NullMat(rank, rank);
+    for i in [1..rank] do
+        for j in [1..rank] do
+            #C_ij = 2(α_i, α_j)/(α_j, α_j)
+            inner_product_matrix[i][j] := cartan_matrix[i][j] * root_norms[j] / 2;
+        od;
+    od;
+    #Print("Inner product matrix (α_i, α_j):\n");
+    
+    # α^∨_i = (2/(α,α))*α_i
+    if orbit_index=1 then
+        Print("=== Computing Coroots ===\n");
+    fi;
+    
+    coroot_simple_coords := [];
+    coroot_labels := [];
+    for i in [1..rank] do
+        coroot_simple_coords[i] := ListWithIdenticalEntries(rank, 0);
+        coroot_simple_coords[i][i] := coroot_scaling_factors[i];
+        coroot_str := "";
+        for j in [1..rank] do
+            coeff := coroot_simple_coords[i][j];
+            if coeff <> 0 then
+                if coroot_str <> "" and coeff > 0 then Append(coroot_str, "+"); fi;
+                if coeff < 0 then Append(coroot_str, "-"); coeff := -coeff; fi;
+                if coeff = 1 then
+                    Append(coroot_str, alpha_labels[j]);
+                else
+                    Append(coroot_str, Concatenation(String(coeff), alpha_labels[j]));
+                fi;
+            fi;
+        od;
+        if coroot_str = "" then coroot_str := "0"; fi;
+        coroot_labels[i] := coroot_str;
+    od;
+    
+    if orbit_index=1 then
+        Print("Coroot basis in simple root coordinates:\n");
+        for i in [1..rank] do
+            Print("  α^∨_", i, " = ", coroot_simple_coords[i], " = ", coroot_labels[i], "\n");
+        od;
+    fi;
+    
+    #<α_j, ω^∨_i> = δ_ji , ω^∨ = (C^{-1})^T α^∨
+
+    if orbit_index=1 then
+        Print("=== Computing Coweights ===\n");
+    fi;
+    
+    coweight_matrix := TransposedMat(weight_matrix);
+    
+    coweight_simple_coords := [];
+    coweight_labels := [];
+    for i in [1..rank] do
+        coweight_simple_coords[i] := ListWithIdenticalEntries(rank, 0);
+        for j in [1..rank] do
+            coweight_simple_coords[i][j] := coweight_matrix[i][j] * coroot_scaling_factors[j];
+        od;
+        
+        coweight_str := "";
+        for j in [1..rank] do
+            coeff := coweight_simple_coords[i][j];
+            if coeff <> 0 then
+                if coweight_str <> "" and coeff > 0 then Append(coweight_str, "+"); fi;
+                if coeff < 0 then Append(coweight_str, "-"); coeff := -coeff; fi;
+                if coeff = 1 then
+                    Append(coweight_str, alpha_labels[j]);
+                else
+                    Append(coweight_str, Concatenation(String(coeff), alpha_labels[j]));
+                fi;
+            fi;
+        od;
+        if coweight_str = "" then coweight_str := "0"; fi;
+        coweight_labels[i] := coweight_str;
+    od;
+    
+    if orbit_index=1 then
+        Print("Coweight basis in simple root coordinates:\n");
+        for i in [1..rank] do
+            Print("  ω^∨_", i, " = ", coweight_simple_coords[i], " = ", coweight_labels[i], "\n");
+        od;
+    fi;
+    
+    #Print("\n=== All Roots in Weight Basis ===\n");
+    
+    weight_space_basis_vectors := BasisVectors(Basis(VectorSpace(Rationals, identity_mat)));
+    basis_weight_space := Basis(VectorSpace(Rationals, identity_mat));
+
+    # 创建根的单根坐标列表
+    root_simple_coordinates := [];
+    for r in all_roots do
+        v_weight := r; 
+        # 计算单根基坐标
+        v_simple := ListWithIdenticalEntries(rank, 0);
+        for j in [1..rank] do
+            for i in [1..rank] do
+                v_simple[j] := v_simple[j] + v_weight[i] * weight_matrix[i][j];
+            od;
+        od;
+        
+        Add(root_simple_coordinates, v_simple);
+    od;
+    #Print("\nAll roots in simple root coordinates: ", root_simple_coordinates, "\n");
+    
+    
+    return rec(
+        cartanL := CartanSubalgebra(L),
+        positive_roots := positive_roots,
+        negative_roots := negative_roots,
+        simple_roots := simple_roots,
+        all_roots := all_roots,
+        alpha_labels := alpha_labels,
+        omega_labels := omega_labels,
+        cartan_matrix := cartan_matrix,       
+        coroot_basis := coroot_simple_coords,
+        weight_matrix := weight_matrix,
+        root_simple_coordinates := root_simple_coordinates,  # 单根基坐标
+    );
+end;
+
+# 3. Compute Cartan decomposition 
+ComputeCartanDecomposition := function(L, theta)
+    local k_basis, p_basis, basis_L, basis_vector, image, k_space, p_space;
+    Print("=== Computing Cartan decomposition ===\n");
+    basis_L := Basis(L);
+    # k = {v ∈ L | θ(v) = v}
+    # p = {v ∈ L | θ(v) = -v}
+    k_basis := [];
+    p_basis := [];
+    
+    for basis_vector in basis_L do
+        image := Image(theta, basis_vector);
+        # k(θ(v) = v)
+        if basis_vector = image then
+            Add(k_basis, basis_vector);
+        # p(θ(v) = -v)
+        elif basis_vector = -image then
+            Add(p_basis, basis_vector);
+        else
+            Print("Warning: Vector not in k or p, using symmetrization\n");
+            if not IsZero(basis_vector + image) then
+                Add(k_basis, basis_vector + image);
+            fi;
+            if not IsZero(basis_vector - image) then
+                Add(p_basis, basis_vector - image);
+            fi;
+        fi;
+    od;
+    
+    if Length(k_basis) > 0 then
+        k_basis := BasisVectors(Basis(VectorSpace(Rationals, k_basis)));
+    fi;
+    
+    if Length(p_basis) > 0 then
+        p_basis := BasisVectors(Basis(VectorSpace(Rationals, p_basis)));
+    fi;
+    
+    Print("Final k basis vectors: ", Length(k_basis), "\n");
+    Print("Final p basis vectors: ", Length(p_basis), "\n");
+    
+    
+    k_space := Subalgebra(L, k_basis);
+    p_space := VectorSpace(Rationals, p_basis);
+
+    Print("k basis vectors: ", k_basis, "\n");
+    
+    if Dimension(k_space) + Dimension(p_space) = Dimension(L) then
+        Print("Cartan decomposition verified: L = k ⊕ p\n");
+    else
+        Print("Warning: Dimension mismatch in Cartan decomposition\n");
+        Print("  k dimension: ", Dimension(k_space), "\n");
+        Print("  p dimension: ", Dimension(p_space), "\n");
+        Print("  k+p dimension: ", Dimension(k_space) + Dimension(p_space), "\n");
+        Print("  L dimension: ", Dimension(L), "\n");
+    fi;
+    
+    return rec(
+        k_space := k_space,
+        p_space := p_space,
+        k_basis := k_basis,
+        p_basis := p_basis,
+        dim_k := Dimension(k_space),
+        dim_p := Dimension(p_space)
+    );
+end;
+
+
+# 4. Compute toral subalgebra
+ComputeToralSubalgebra := function(L, k_space, k_basis, cartanL)
+    local cartan_basis_k, current_basis_toral, i;
+    
+    Print("=== Computing Toral Subalgebra ===\n");
+    Print("-- Using Cartan subalgebra of L that lies in k ---\n");
+    cartan_basis_k := Filtered(BasisVectors(Basis(cartanL)), v -> v in k_space);
+    current_basis_toral := ShallowCopy(cartan_basis_k);
+    
+    Print("Toral basis dimension: ", Length(current_basis_toral), "\n");
+    Print("Toral basis vectors: ", current_basis_toral, "\n");
+
+    if Length(current_basis_toral) > 0 then
+        current_basis_toral := BasisVectors(Basis(VectorSpace(Rationals, current_basis_toral)));
+    fi;
+    return rec(
+        toral_subalgebra_basis := current_basis_toral,
+        toral_subalgebra_dim := Length(current_basis_toral)
+    );
+end;
+
+# 5. Compute triple labels
+ComputeTripleLabels := function(x, L, cartanL, simple_roots, k_space, k_basis, k_toral_basis, type, theta_choice)
+    local basis_L, x_cartan_coords, L_label_parts, i, j, alpha_i, alpha_value,
+          k_algebra, k_cartan, k_root_system, k_positive_roots, k_simple_roots,
+          k_rank, k_label_parts, k_cartan_basis, x_k_cartan_coords, beta_k_x, 
+          temp, k_cartan_coeffs, k_alpha_i, k_alpha_value, 
+          k_root_vectors, root_vec, comm, eigenvalue, found, ratio, coeffs_root,
+          coeffs_comm, m, all_match, k_basis_vectors, k_pos_roots, alpha_x_value, beta_value_k;
+    
+    Print("=== Computing triple labels ===\n");
+    
+    basis_L := Basis(L);
+    
+    # 1. L_label:
+    Print("--- Computing L label ---\n");
+    x_cartan_coords := Coefficients(Basis(cartanL), x);
+
+    if x_cartan_coords = fail then
+        Print("Warning: x not in Cartan subalgebra of L, using projection\n");
+        x_cartan_coords := List(BasisVectors(Basis(cartanL)), b -> 0);
+    fi;
+    Print("x coordinates in L's Cartan basis: ", x_cartan_coords, "\n");
+    
+    L_label_parts := [];
+    alpha_x_value := [];
+    for i in [1..Length(simple_roots)] do
+        alpha_i := simple_roots[i];
+        alpha_value := 0;
+        for j in [1..Length(alpha_i)] do
+            if j <= Length(x_cartan_coords) then
+                alpha_value := alpha_value + alpha_i[j] * x_cartan_coords[j];
+            fi;
+        od;
+        Add(L_label_parts, alpha_value);
+        Print("  α_", i, "(x) = ", alpha_value, ";   ");
+    od;
+    Print("L label parts: ",L_label_parts, "\n");
+    
+    # 2. k_label:
+    k_algebra := Subalgebra(L, k_basis);
+    
+    k_cartan := Subalgebra(k_algebra, k_toral_basis);
+    if Dimension(k_cartan) = 0 then
+        Print("Warning: k's toral subalgebra is zero-dimensional\n");
+        k_label_parts := [];
+    else
+        
+        #
+        k_basis_vectors := BasisVectors(Basis(k_algebra));
+        k_label_parts := [];
+        k_cartan_basis := BasisVectors(Basis(k_cartan));
+        x_k_cartan_coords := Coefficients(Basis(k_cartan), x);
+        
+        if x_k_cartan_coords = fail then
+            Print("Warning: x not in k's Cartan subalgebra\n");
+            x_k_cartan_coords := List([1..Length(k_cartan_basis)], i -> 0);
+        fi;
+        Print("x coordinates in k's Cartan basis: ", x_k_cartan_coords, "\n");
+        
+        k_rank := Dimension(k_cartan);
+        if k_rank > 0 then
+            beta_k_x := ListWithIdenticalEntries(k_rank, 0);
+            if type = "F" then
+
+                if theta_choice =1 then
+
+                    beta_k_x[1] := L_label_parts[4]+2*L_label_parts[3]+2*L_label_parts[1];
+                    beta_k_x[2] := L_label_parts[2];
+                    beta_k_x[3] := L_label_parts[4];
+                    beta_k_x[4] := L_label_parts[3];
+                fi;
+
+                if theta_choice = 2 then    
+                    beta_k_x[1] := L_label_parts[1];
+                    beta_k_x[2] := L_label_parts[3];
+                    beta_k_x[3] := L_label_parts[4];
+                    beta_k_x[4] := 2*L_label_parts[2]+3*L_label_parts[4]+4*L_label_parts[3]+2*L_label_parts[1];
+                fi;
+            fi;
+
+            if type = "E" then
+                if k_rank=6 then
+                    #EIII
+                    if theta_choice =1 then
+                        beta_k_x[1] := L_label_parts[6];
+                        beta_k_x[2] := L_label_parts[5];
+                        beta_k_x[3] := L_label_parts[4];
+                        beta_k_x[4] := L_label_parts[3];
+                        beta_k_x[5] := L_label_parts[2];
+                        beta_k_x[6] := L_label_parts[1];
+                        #beta_k_x[1] := L_label_parts[1];
+                        #beta_k_x[2] := L_label_parts[3];
+                        #beta_k_x[3] := L_label_parts[4];
+                        #beta_k_x[4] := L_label_parts[2];
+                        #beta_k_x[5] := L_label_parts[5];
+                        #beta_k_x[6] := -L_label_parts[1]-2*L_label_parts[2]-2*L_label_parts[3]-3*L_label_parts[4]-2*L_label_parts[5]-L_label_parts[6];
+                    fi;
+                    
+                    #EII
+                    if theta_choice = 2 then    
+                        beta_k_x[1] := L_label_parts[1];
+                        beta_k_x[2] := L_label_parts[3];
+                        beta_k_x[3] := L_label_parts[4];
+                        beta_k_x[4] := L_label_parts[5];
+                        beta_k_x[5] := L_label_parts[6];
+                        beta_k_x[6] := L_label_parts[1]+2*L_label_parts[2]+2*L_label_parts[3]+3*L_label_parts[4]+2*L_label_parts[5]+L_label_parts[6];
+                    fi;
+                fi;
+
+                if k_rank=7 then
+                    #EVI
+                    if theta_choice =1 then
+
+                        beta_k_x[1] := L_label_parts[7];
+                        beta_k_x[2] := L_label_parts[6];
+                        beta_k_x[3] := L_label_parts[5];
+                        beta_k_x[4] := L_label_parts[4];
+                        beta_k_x[5] := L_label_parts[3];
+                        beta_k_x[6] := L_label_parts[2];
+                        beta_k_x[7] := 2*L_label_parts[1]+2*L_label_parts[2]+3*L_label_parts[3]+4*L_label_parts[4]+3*L_label_parts[5]+2*L_label_parts[6]+L_label_parts[7];
+                    fi;
+                    
+                    #EV
+                    if theta_choice = 2 then    
+                        beta_k_x[1] := L_label_parts[1];
+                        beta_k_x[2] := L_label_parts[3];
+                        beta_k_x[3] := L_label_parts[4];
+                        beta_k_x[4] := L_label_parts[5];
+                        beta_k_x[5] := L_label_parts[6];
+                        beta_k_x[6] := L_label_parts[7];
+                        beta_k_x[7] := L_label_parts[1]+2*L_label_parts[2]+2*L_label_parts[3]+3*L_label_parts[4]+2*L_label_parts[5]+L_label_parts[6];
+                    fi;
+
+                    #EVII
+                    if theta_choice = 3 then    
+                        beta_k_x[1] := L_label_parts[6];
+                        beta_k_x[2] := L_label_parts[2];
+                        beta_k_x[3] := L_label_parts[5];
+                        beta_k_x[4] := L_label_parts[4];
+                        beta_k_x[5] := L_label_parts[3];
+                        beta_k_x[6] := L_label_parts[1];
+                        beta_k_x[7] := -(2*L_label_parts[1]+2*L_label_parts[2]+3*L_label_parts[3]+4*L_label_parts[4]+3*L_label_parts[5]+2*L_label_parts[6]+L_label_parts[7]);
+                    fi;
+                fi;
+
+                if k_rank=8 then
+
+                    #EVIII
+                    if theta_choice =1 then
+
+                        beta_k_x[1] := 2*L_label_parts[1]+2*L_label_parts[2]+3*L_label_parts[3]+4*L_label_parts[4]+3*L_label_parts[5]+2*L_label_parts[6]+L_label_parts[7];
+                        beta_k_x[2] := L_label_parts[8];
+                        beta_k_x[3] := L_label_parts[7];
+                        beta_k_x[4] := L_label_parts[6];
+                        beta_k_x[5] := L_label_parts[5];
+                        beta_k_x[6] := L_label_parts[4];
+                        beta_k_x[7] := L_label_parts[2];
+                        beta_k_x[8] := L_label_parts[3];
+                    fi;
+                    
+                    #EIX
+                    if theta_choice = 2 then    
+                        beta_k_x[1] := L_label_parts[1];
+                        beta_k_x[2] := L_label_parts[2];
+                        beta_k_x[3] := L_label_parts[3];
+                        beta_k_x[4] := L_label_parts[4];
+                        beta_k_x[5] := L_label_parts[5];
+                        beta_k_x[6] := L_label_parts[6];
+                        beta_k_x[7] := L_label_parts[7];
+                        beta_k_x[8] := 2*L_label_parts[1]+3*L_label_parts[2]+4*L_label_parts[3]+6*L_label_parts[4]+5*L_label_parts[5]+4*L_label_parts[6]+3*L_label_parts[7]+2*L_label_parts[8];
+                    fi;
+                fi;
+            fi; 
+        else
+            k_label_parts := [0]; 
+        fi;
+    fi;
+    Print("k label parts: ", beta_k_x, "\n");
+    
+    return rec(
+        L_label := JoinStringsWithSeparator(List(L_label_parts, String), ","),
+        k_label := JoinStringsWithSeparator(List(beta_k_x, String), ","),
+        L_label_parts := L_label_parts,
+        k_label_parts := beta_k_x,
+        x_cartan_coords := x_cartan_coords
+    );
+end;
+
+#Test Even orbits
+TestEvenOrbits := function(triple_labels_result,rank)
+    local L_label_parts,i,j,isevenorb;
+
+    L_label_parts := triple_labels_result.L_label_parts;
+    i:=0;
+    for j in [1..rank] do
+        if L_label_parts[j]/2 in Integers then
+            i:=i;
+        else
+            i:=i+1;
+        fi;
+    od;
+    if i=0 then
+        isevenorb:=true;
+        Print("The orbit is even\n");
+    else
+        isevenorb:=false;
+        Print("The orbit is not even \n");
+    fi;
+    return rec(is_even_orbit := isevenorb);
+end;
+
+# 6. Analyze root space distribution 
+AnalyzeRootSpaceDistribution := function(L, x, theta, k_space, p_space, root_info, alpha_i_x_values)
+    local R, positive_roots, negative_roots, all_roots, root_vectors,
+          root_data, i, root_vec, eigenvalue, root_space_type, 
+          root_simple_coords, root_weight_coords, basis_weight_space,
+          root_image, j, k, alpha_x_value, rank, cartan_matrix,
+          weight_matrix, v_simple;
+    
+    Print("=== Analyzing Root Space Distribution (Corrected) ===\n");
+    rank := Length(alpha_i_x_values);
+    
+    R := RootSystem(L);
+    positive_roots := root_info.positive_roots;
+    negative_roots := root_info.negative_roots;
+    all_roots := root_info.all_roots;
+    
+    cartan_matrix := root_info.cartan_matrix;
+    weight_matrix := root_info.weight_matrix;  # C^{-1}
+    
+    root_vectors := Concatenation(PositiveRootVectors(R), NegativeRootVectors(R));
+    
+    root_data := [];
+    
+    for i in [1..Length(all_roots)] do
+        root_vec := root_vectors[i];
+        
+        root_image := Image(theta, root_vec);
+        if root_vec = root_image then
+            root_space_type := "k";
+        elif root_vec = -root_image then
+            root_space_type := "p";
+        else
+            root_space_type := "Mixed";
+        fi;
+        
+        root_weight_coords := all_roots[i];
+        
+        root_simple_coords := root_info.root_simple_coordinates[i];
+        
+        # α(x) = Σ_i root_simple_coords[i] * α_i(x)
+        alpha_x_value := 0;
+        for j in [1..rank] do
+            alpha_x_value := alpha_x_value + root_simple_coords[j] * alpha_i_x_values[j];
+        od;
+        
+        eigenvalue := alpha_x_value;
+        Add(root_data, rec(
+            root_index := i,
+            root_vector := root_vec,
+            root_weight_coords := root_weight_coords, 
+            root_simple_coords := root_simple_coords, 
+            space_type := root_space_type,
+            eigenvalue := eigenvalue,
+            alpha_x_value := alpha_x_value
+        ));
+    od;
+
+    Print("Analyzed ", Length(root_data), " root spaces ;");
+    Print("Root spaces in k: ", Number(root_data, r -> r.space_type = "k"), ";");
+    Print("Root spaces in p: ", Number(root_data, r -> r.space_type = "p"), "\n");
+    Print("Root spaces in k0: ", Number(root_data, r -> r.space_type = "k" and r.eigenvalue = 0), ";");
+    Print("Root spaces in p2: ", Number(root_data, r -> r.space_type = "p" and r.eigenvalue = 2), "\n");
+    return rec(root_data := root_data);
+end;
+
+# 7. Compute stabilizer subalgebra and its Cartan subalgebra
+ComputeStabilizer := function(L, x, e, f, k_space, p_space, dim_k, dim_p, rank)
+    local basis_k, basis_p, basis_L, equations, total_eq_dim, i, b, eq_x, eq_e, eq_f,
+          full_eq, j, solution_space, result_basis, sol, idx, sum, stab, 
+          equations1, solution_space1,b1,eq_e1,eq_f1,full_eq1,
+          stab_cartan, stab_cartan_basis, stab_cartan_dim;
+    
+    Print("=== Computing Stabilizer and its Cartan Subalgebra ===\n");
+    
+    basis_k := BasisVectors(Basis(k_space));
+    basis_p := BasisVectors(Basis(p_space));
+    equations := [];
+    total_eq_dim := dim_k + 2*dim_p;
+    
+    for i in [1..dim_k] do
+        b := basis_k[i];
+        eq_x := Coefficients(Basis(k_space), b * x);
+        eq_e := Coefficients(Basis(p_space), b * e);
+        eq_f := Coefficients(Basis(p_space), b * f);
+        
+        full_eq := ListWithIdenticalEntries(total_eq_dim, 0);
+        for j in [1..dim_k] do full_eq[j] := eq_x[j]; od;
+        for j in [1..dim_p] do full_eq[dim_k + j] := eq_e[j]; od;
+        for j in [1..dim_p] do full_eq[dim_k + dim_p + j] := eq_f[j]; od;
+        Add(equations, full_eq);
+    od;
+
+    #Print("Stabilizer equations: ", equations, "\n");
+    
+    if Length(equations) > 0 then
+        solution_space := NullspaceMat(Matrix(equations));
+    else
+        solution_space := [];
+    fi;
+
+    Print("Solution space: ", solution_space, "\n");
+    
+    result_basis := [];
+    for i in [1..Length(solution_space)] do
+        sol := solution_space[i];
+        sum := Zero(L);
+        for idx in [1..dim_k] do
+            sum := sum + sol[idx] * basis_k[idx];
+        od;
+        Add(result_basis, sum);
+    od;
+
+    Print("Stabilizer basis: ", result_basis, "\n");
+    
+    stab := Subalgebra(L, result_basis);
+    
+    Print("Stabilizer dimension: ", Dimension(stab), "\n");
+    
+    Print("Stabilizer basis: ", result_basis, "\n");
+
+    # Compute Cartan subalgebra of stabilizer
+    equations1:=[];
+    for i in [1..rank] do
+        b1 := basis_k[dim_k-rank+i];
+        eq_e1 := Coefficients(Basis(p_space), b1 * e);
+        eq_f1 := Coefficients(Basis(p_space), b1 * f);
+        full_eq1 := ListWithIdenticalEntries(2*dim_p, 0);
+        for j in [1..dim_p] do full_eq1[j] := eq_e1[j]; od;
+        for j in [1..dim_p] do full_eq1[j+dim_p] := eq_f1[j]; od;
+        Add(equations1,full_eq1);
+    od;
+    Print("Stabilizer Cartan equations: ", equations1, "\n");
+    
+    if Length(equations1) > 0 then
+        solution_space1 := NullspaceMat(Matrix(equations1));
+    else
+        solution_space1 := [];
+    fi;
+    Print("solution1:", solution_space1, "\n");
+   
+    stab_cartan := CartanSubalgebra(stab);
+    Print("Stabilizer Cartan subalgebra: ", stab_cartan, "\n");
+    if stab_cartan <> fail then
+        stab_cartan_basis := BasisVectors(Basis(stab_cartan));
+        stab_cartan_dim := Dimension(stab_cartan);
+        Print("Stabilizer Cartan subalgebra dimension: ", stab_cartan_dim, "\n");
+        Print("Stabilizer Cartan basis: ", stab_cartan_basis, "\n");
+    else
+        stab_cartan_basis := [];
+        stab_cartan_dim := 0;
+        Print("Warning: Cannot compute Cartan subalgebra of stabilizer\n");
+    fi;
+    
+    return rec(
+        stabilizer := stab,
+        equations:= equations,
+        solution_space := solution_space,
+        stab_dim := Dimension(stab),
+        stab_cartan_basis := stab_cartan_basis,
+        stab_cartan_dim := stab_cartan_dim
+    );
+end;
+
+
+# 8. Compute coweight coordinates for stabilizer Cartan
+ComputeSubalgebraWeightCoordinates := function(L, root_info, toral_basis, toral_dim, type, rank, theta_choice)
+    local cartanL, cartan_basis, cartan_coords, i, j, k, M1, vi, gcdi, gcd_list, 
+          weight_matrix, coroot_basis, cartan_matrix,
+          denomslst, Lcmlst, intslst, gcdlst, 
+          t_simple_coords, t_weight_coords, coeff_Ha_in_wk, coeff_wk_in_Ha;
+    
+    Print("\n=== Computing Stabilizer Coweight Coordinates ===\n");
+
+    cartanL := root_info.cartanL;
+    cartan_basis := BasisVectors(Basis(cartanL));
+    
+    Print("Stabilizer Cartan basis dimension: ", toral_dim, "\n");
+    Print("Parent algebra rank: ", Length(root_info.simple_roots), "\n");
+    
+    cartan_matrix := root_info.cartan_matrix;
+    weight_matrix := root_info.weight_matrix;  # C^{-1}
+    coroot_basis := root_info.coroot_basis;
+    
+    cartan_coords := [];
+    for i in [1..toral_dim] do
+        cartan_coords[i] := Coefficients(Basis(cartanL), toral_basis[i]);
+        if cartan_coords[i] = fail then
+            Print("Warning: Stabilizer Cartan basis vector ", i, " not in parent Cartan subalgebra\n");
+            cartan_coords[i] := ListWithIdenticalEntries(Length(root_info.simple_roots), 0);
+        fi;
+        denomslst := List(cartan_coords[i], DenominatorRat);
+        Lcmlst := Lcm(denomslst);                      
+        intslst := List(cartan_coords[i], x -> x * Lcmlst);        
+        gcdlst := Gcd(intslst);                       
+        if gcdlst = 0 then
+            cartan_coords[i] := ShallowCopy(cartan_coords[i]);
+        else
+            cartan_coords[i] := List(intslst, x -> x / gcdlst);
+        fi;
+        Print("Stabilizer Coroot ", i, " in L's Coroot basis: ", cartan_coords[i], "\n");
+    od;
+    
+    t_simple_coords := [];
+    for i in [1..toral_dim] do
+        t_simple_coords[i] := ListWithIdenticalEntries(Length(root_info.simple_roots), 0);
+        for j in [1..Length(root_info.simple_roots)] do
+            if cartan_coords[i][j] <> 0 then
+                for k in [1..Length(root_info.simple_roots)] do
+                    t_simple_coords[i][k] := t_simple_coords[i][k] + 
+                        cartan_coords[i][j] * coroot_basis[j][k];
+                od;
+            fi;
+        od;
+        #Print("Stabilizer Cartan basis vector ", i, " in simple root basis: ", t_simple_coords[i], "\n");
+    od;
+    
+    t_weight_coords := [];
+    for i in [1..toral_dim] do
+        t_weight_coords[i] := ListWithIdenticalEntries(Length(root_info.simple_roots), 0);
+        for j in [1..Length(root_info.simple_roots)] do
+            for k in [1..Length(root_info.simple_roots)] do
+                t_weight_coords[i][j] := t_weight_coords[i][j] + 
+                    cartan_matrix[k][j] * t_simple_coords[i][k];
+            od;
+        od;
+        Print("Stabilizer Cartan basis vector ", i, " in weight basis of L: ", t_weight_coords[i], "\n");
+    od;
+
+    if toral_dim > 0 then
+        coeff_Ha_in_wk := NullMat(toral_dim, rank);
+        coeff_wk_in_Ha := NullMat(rank, rank);
+        gcd_list := ListWithIdenticalEntries(toral_dim, 1);
+        if type = "F" then
+
+            if theta_choice =1 then
+                #FII
+                coeff_wk_in_Ha :=[[1,1,3/2,2],[1,2,2,3],[1,2,5/2,4],[1,2,3,4]]; #coordinates about coweight of k in coroot basis of L 
+                M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                for i in [1..toral_dim] do
+                    vi:= Vector(Rationals,cartan_coords[i]);
+                    coeff_Ha_in_wk[i] := SolutionMat(M1, vi); #coordinates of toral cartan basis in coweight basis of k
+                od;
+                Print("\n toral cartan basis in coweight basis of k: \n",coeff_Ha_in_wk);
+            fi;
+
+            if theta_choice = 2 then   
+                #FI 
+                coeff_wk_in_Ha :=[[1,0,1,1],[1,0,2,2],[1/2,0,1,3/2],[0,1/2,0,1/2]];
+                M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                for i in [1..toral_dim] do
+                    vi:= Vector(Rationals,cartan_coords[i]);
+                    coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                od;
+                Print("\n toral cartan basis in coweight basis of k: \n",coeff_Ha_in_wk);
+            fi;
+        fi;
+
+        if type = "E" then
+            if rank=6 then
+                #EIII
+                if theta_choice =1 then
+                    coeff_wk_in_Ha :=[[1,1/2,1,1,1/2,0],[1,1,2,2,1,0],[1,3/2,2,3,3/2,0],[1/2,5/4,1,3/2,3/4,0],[1/2,3/4,1,3/2,5/4,0],[1/2,1,1,3/2,1,1/2]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);   
+                fi;
+                
+                #EII
+                if theta_choice = 2 then    
+                    coeff_wk_in_Ha :=[[5/6,0,2/3,1/2,1/3,1/6],[2/3,0,4/3,1,2/3,1/3],[1/2,0,1,3/2,1,1/2],[1/3,0,2/3,1,4/3,2/3],[1/6,0,1/3,1/2,2/3,5/6],[1/2,1,1,3/2,1,1/2]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);        
+                fi;
+            fi;
+
+            if rank=7 then
+                #EVI
+                if theta_choice =1 then
+
+                    coeff_wk_in_Ha :=[[0,1/2,1/2,1,1,1,1],[0,1,1,2,2,2,1],[0,3/2,3/2,3,3,2,1],[0,2,2,4,3,2,1],[0,1,3/2,2,3/2,1,1/2],[0,3/2,1,2,3/2,1,1/2],[1,1,3/2,2,3/2,1,1/2]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);
+                fi;
+                
+                #EV
+                if theta_choice = 2 then    
+                    coeff_wk_in_Ha :=[[1,1/4,1,1,3/4,1/2,1/4],[1,1/2,2,2,3/2,1,1/2],[1,3/4,2,3,9/4,3/2,3/4],[1,1,2,3,3,2,1],[1,5/4,2,3,11/4,5/2,5/4],[1,3/2,2,3,5/2,2,3/2],[1,7/4,2,3,9/4,3/2,3/4]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);
+                fi;
+
+                #EVII
+                if theta_choice = 3 then    
+                    coeff_wk_in_Ha :=[[3/2,1,4/3,2,5/3,4/3,0],[1,2,2,3,2,1,0],[4/3,2,8/3,4,10/3,5/3,0],[2,3,4,6,4,2,0],[5/3,2,10/3,4,8/3,4/3,0],[4/3,1,5/3,2,4/3,2/3,0],[-2,-2,-3,-4,-3,-2,-1]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);
+                fi;
+            fi;
+
+            if rank=8 then
+
+                #EVIII
+                if theta_choice =1 then
+
+                    coeff_wk_in_Ha :=[[2,5/2,7/2,5,4,3,2,1],[2,3,4,6,5,4,3,2],[2,7/2,9/2,7,6,5,4,2],[2,4,5,8,7,6,4,2],[2,9/2,11/2,9,8,6,4,2],[2,5,6,10,8,6,4,2],[1,3,3,5,4,3,2,1],[1,5/2,7/2,5,4,3,2,1]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);
+                fi;
+                
+                #EIX
+                if theta_choice = 2 then    
+                    coeff_wk_in_Ha :=[[2,2,3,4,3,2,1,0],[2,7/2,4,6,9/2,3,3/2,0],[3,4,6,8,6,4,2,0],[4,6,8,12,9,6,3,0],[3,9/2,6,9,15/2,5,5/2,0],[2,3,4,6,5,4,2,0],[1,3/2,2,3,5/2,2,3/2,0],[1,3/2,4,6,5,4,3,2]];
+                    M1:=Matrix(Rationals, coeff_wk_in_Ha);
+                    for i in [1..toral_dim] do
+                        vi:= Vector(Rationals,cartan_coords[i]);
+                        coeff_Ha_in_wk[i] := SolutionMat(M1, vi);
+                    od;
+                    Print("\n toral cartan basis in coweight basis of k:\n",coeff_Ha_in_wk);
+                fi;
+            fi;
+        fi; 
+    fi;
+    return rec(
+        toral_dim := toral_dim,
+        cartan_coords := cartan_coords,
+        t_simple_coords := t_simple_coords,
+        t_weight_coords := t_weight_coords,
+        weight_matrix := weight_matrix,
+        cartan_matrix := cartan_matrix,
+        coeff_Ha_in_wk := coeff_Ha_in_wk,
+        coeff_wk_in_Ha := coeff_wk_in_Ha
+    );
+end;
+
+# Helper：
+MatrixColsToPrimitiveIntegers := function(M)
+    local m, scaledM, row, i, scalingFactor, rowGcd;
+    M:=TransposedMat(M);
+    m := Length(M);
+    scaledM := [];
+    for i in [1..m] do
+        row := M[i];
+        scalingFactor := Lcm(List(row, DenominatorRat));
+        row := row * scalingFactor; 
+        rowGcd := Gcd(row);
+        if rowGcd > 1 then
+            row := row / rowGcd;
+        fi;
+        scaledM[i] := row;
+    od;
+    return TransposedMat(scaledM);
+end;
+
+# 9. Compute coweight lattice in stable 
+ComputeCoweightLattice := function(L, x, e, f, k_space, p_space, dim_k, dim_p,root_info, toral_basis, toral_dim, stab_dim, subalgebra_info, type, rank, theta_choice)
+    local basis_k, basis_p, basis_L, equations, total_eq_dim, i,k, b, eq_x, eq_e, eq_f, int_coweight_matrix, coweight_mat_instab_HNF,
+          coeff_Ha_in_wk, coeff_wk_in_Ha, cartan_coords, Ha_of_stable_in_newcoweight, I_rows, equations_with_I, Triangulize_eqwI, guass_solution_coweight, 
+          full_eq, j, solution_space, sol, idx, sum, stab, M2, vi, transpoesdet, 
+          stab_cartan, stab_cartan_basis, stab_cartan_dim, coweight_matrix_instable, coweight_of_stable_inHa;
+    
+    Print("\n === Compute coweight lattice in k stablizer ===\n");
+    
+    basis_k := BasisVectors(Basis(k_space));
+    basis_p := BasisVectors(Basis(p_space));
+    basis_L := Basis(L);
+    equations := [];
+    total_eq_dim := dim_k + 2*dim_p;
+    coeff_Ha_in_wk := subalgebra_info.coeff_Ha_in_wk;
+    coeff_wk_in_Ha := subalgebra_info.coeff_wk_in_Ha;
+    cartan_coords := subalgebra_info.cartan_coords;
+
+    
+    for i in [1..dim_k] do
+        if i in [1..dim_k-rank] then
+            b := basis_k[i];
+            eq_x := Coefficients(Basis(k_space), b * x);
+            eq_e := Coefficients(Basis(p_space), b * e);
+            eq_f := Coefficients(Basis(p_space), b * f);
+        fi;
+
+        if i in [dim_k+1-rank..dim_k] then
+            b:=Zero(L);
+            for j in [1.. rank] do
+                b := b + coeff_wk_in_Ha[i-dim_k+rank][j]*basis_k[j+dim_k-rank];
+            od;
+            eq_x := Coefficients(Basis(k_space), b * x);
+            eq_e := Coefficients(Basis(p_space), b * e);
+            eq_f := Coefficients(Basis(p_space), b * f);
+        fi;
+
+        full_eq := ListWithIdenticalEntries(total_eq_dim, 0);
+        for j in [1..dim_k] do full_eq[j] := eq_x[j]; od;
+        for j in [1..dim_p] do full_eq[dim_k + j] := eq_e[j]; od;
+        for j in [1..dim_p] do full_eq[dim_k + dim_p + j] := eq_f[j]; od;
+        
+        Add(equations, full_eq);
+    od;
+
+    I_rows:=IdentityMat(dim_k);
+    equations_with_I := MatrixColsToPrimitiveIntegers(List([1..dim_k],i->Concatenation([equations[i],I_rows[i]])));
+    Triangulize_eqwI :=NormalFormIntMat(equations_with_I,6);
+    guass_solution_coweight:=NullMat(stab_dim, dim_k);
+
+    for i in [1..stab_dim] do
+        for j in [1..dim_k] do
+            guass_solution_coweight[i][j] := Triangulize_eqwI.normal[dim_k-stab_dim+i][j+dim_k+2*dim_p];
+        od;
+    od;
+
+    int_coweight_matrix := NullMat(toral_dim, rank);
+    for i in [1..toral_dim] do
+
+        for j in [1..rank] do
+            int_coweight_matrix[i][j] := guass_solution_coweight[stab_dim-toral_dim+i][j+dim_k-rank];
+        od;
+    od;
+
+    int_coweight_matrix:=TransposedMat(MatrixColsToPrimitiveIntegers(TransposedMat(int_coweight_matrix)));
+
+    Print("Stable coweight expressed in integral coweight of k: ", int_coweight_matrix, "\n");
+    Print("Coweight coeff of k expressed in H_a: ", coeff_wk_in_Ha, "\n");
+
+    coweight_matrix_instable:=int_coweight_matrix;
+    coweight_of_stable_inHa :=[];
+    for i in [1..toral_dim] do
+        coweight_of_stable_inHa[i] := ListWithIdenticalEntries(rank, 0);
+        for j in [1..rank] do
+            for k in [1..rank] do
+                coweight_of_stable_inHa[i][j]:=coweight_of_stable_inHa[i][j]+coweight_matrix_instable[i][k]*coeff_wk_in_Ha[k][j];
+            od;
+        od;
+    od;
+    Print("Coweight of stable expressed in H_a: ", coweight_of_stable_inHa, "\n");
+    
+    Ha_of_stable_in_newcoweight := NullMat(toral_dim, toral_dim);
+    for i in [1..toral_dim] do
+        M2 := Matrix(Rationals, coweight_of_stable_inHa);
+        vi := Vector(Rationals, cartan_coords[i]);
+        Ha_of_stable_in_newcoweight[i] := SolutionMat(M2, vi);
+    od;
+    Print("\n Cartan basis H_a of stable in stable coweight: ", Ha_of_stable_in_newcoweight, "\n");
+    transpoesdet:= DeterminantMatrix(Ha_of_stable_in_newcoweight);
+    Print("Determinant of H_a of stable in stable coweight: ", transpoesdet, "\n");
+    return rec(
+        coweight_matrix_instable := coweight_matrix_instable, 
+        coweight_of_stable_inHa := coweight_of_stable_inHa
+    );
+end;
+
+
+
+# Helper1: Format Root Expression
+FormatRootExpression := function(coeffs, symbol, rank)
+    local result, i, coeff;
+    result := "";
+    for i in [1..rank] do
+        coeff := coeffs[i];
+        if coeff <> 0 then
+            if result <> "" and coeff > 0 then
+                Append(result, " + ");
+            elif coeff < 0 then
+                if result <> "" then
+                    Append(result, " - ");
+                else
+                    Append(result, "-");
+                fi;
+                coeff := -coeff;
+            fi;
+            if coeff <> 1 then
+                Append(result, String(coeff));
+            fi;
+            Append(result, symbol);
+            Append(result, "_");
+            Append(result, String(i));
+        fi;
+    od;
+    if result = "" then
+        return "0";
+    else
+        return result;
+    fi;
+end;
+
+# 10. Compute root sums for dert_x calculation
+ComputeRootSums := function(root_distribution, root_info, stab_cartan_dim, subalgebra_info, coweight_lattice_k, stabilizer_result)
+    local root_data, k_roots, p_roots, root_rec, alpha_x_value, 
+          weight_matrix, cartan_matrix, rank, root_simple_coords, root_weight_coords, stab_cartan_basis, 
+          sum_method1_simple, sum_method2_simple, sum_method1_weight, sum_method2_weight,
+          i, j, k, pairing_values_method1, pairing_values_method2, pairing_values_method1_coroot, pairing_values_method2_coroot, 
+          method1_roots_k, method1_roots_p, method2_roots_k, method2_roots_p,
+          sum_method1_simple_str, sum_method2_simple_str,
+          sum_method1_weight_str, sum_method2_weight_str,
+          all_roots, coeff, cartan_coords, t_weight_coords,t_simple_coords, t_cartan_coords, 
+          coweight_of_stable_inHa;
+    
+    Print("\n=== Computing Root Sums for dert_x===\n");
+    
+    root_data := root_distribution.root_data;
+    weight_matrix := root_info.weight_matrix;
+    cartan_matrix := root_info.cartan_matrix;
+    rank := Length(root_info.simple_roots);
+    all_roots := root_info.all_roots;
+    
+    t_weight_coords := subalgebra_info.t_weight_coords;
+    t_simple_coords := subalgebra_info.t_simple_coords;
+    t_cartan_coords := subalgebra_info.cartan_coords;
+    cartan_coords := subalgebra_info.cartan_coords;
+
+    coweight_of_stable_inHa := coweight_lattice_k.coweight_of_stable_inHa;
+    
+    k_roots := Filtered(root_data, r -> r.space_type = "k");
+    p_roots := Filtered(root_data, r -> r.space_type = "p");
+    
+    sum_method1_simple := ListWithIdenticalEntries(rank, 0);
+    sum_method2_simple := ListWithIdenticalEntries(rank, 0);
+    sum_method1_weight := ListWithIdenticalEntries(rank, 0);
+    sum_method2_weight := ListWithIdenticalEntries(rank, 0);
+    
+    pairing_values_method1 := ListWithIdenticalEntries(stab_cartan_dim, 0);
+    pairing_values_method2 := ListWithIdenticalEntries(stab_cartan_dim, 0);
+    pairing_values_method1_coroot := ListWithIdenticalEntries(stab_cartan_dim, 0);
+    pairing_values_method2_coroot := ListWithIdenticalEntries(stab_cartan_dim, 0);
+    
+    method1_roots_k := [];
+    method1_roots_p := [];
+    method2_roots_k := [];
+    method2_roots_p := [];
+    
+    #Print("Processing ", Length(k_roots), " k roots and ", Length(p_roots), " p roots\n");
+    
+    #Method1
+    for root_rec in k_roots do
+        alpha_x_value := root_rec.alpha_x_value;
+        if alpha_x_value >= 1 then
+            Add(method1_roots_k, rec(
+                root_index := root_rec.root_index,
+                alpha_x_value := alpha_x_value
+            ));
+            
+            for i in [1..rank] do
+                sum_method1_simple[i] := sum_method1_simple[i] + root_rec.root_simple_coords[i];
+            od;
+        fi;
+    od;
+    
+    for root_rec in p_roots do
+        alpha_x_value := root_rec.alpha_x_value;
+        if alpha_x_value >= 2 then
+            Add(method1_roots_p, rec(
+                root_index := root_rec.root_index,
+                alpha_x_value := alpha_x_value
+            ));
+    
+            for i in [1..rank] do
+                sum_method1_simple[i] := sum_method1_simple[i] - root_rec.root_simple_coords[i];
+            od;
+        fi;
+    od;
+    
+    #Method2
+    for root_rec in k_roots do
+        alpha_x_value := root_rec.alpha_x_value;
+        if alpha_x_value >= 2 then
+            Add(method2_roots_k, rec(
+                root_index := root_rec.root_index,
+                alpha_x_value := alpha_x_value
+            ));
+            
+            for i in [1..rank] do
+                sum_method2_simple[i] := sum_method2_simple[i] + root_rec.root_simple_coords[i];
+            od;
+        fi;
+    od;
+    
+    for root_rec in p_roots do
+        alpha_x_value := root_rec.alpha_x_value;
+        if alpha_x_value >= 1 then
+            Add(method2_roots_p, rec(
+                root_index := root_rec.root_index,
+                alpha_x_value := alpha_x_value
+            ));
+            
+            for i in [1..rank] do
+                sum_method2_simple[i] := sum_method2_simple[i] - root_rec.root_simple_coords[i];
+            od;
+        fi;
+    od;
+    
+    for i in [1..rank] do
+        sum_method1_weight[i] := 0;
+        sum_method2_weight[i] := 0;
+        for j in [1..rank] do
+            sum_method1_weight[i] := sum_method1_weight[i] + cartan_matrix[j][i] * sum_method1_simple[j];
+            sum_method2_weight[i] := sum_method2_weight[i] + cartan_matrix[j][i] * sum_method2_simple[j];
+        od;
+    od;
+    
+    # v(t_j) = Σ_i v[i] * ω_i(t_j) = Σ_i v[i] * t_weight_coords[j][i]
+    if stab_cartan_dim > 0 then
+        for i in [1..stab_cartan_dim] do
+            pairing_values_method1[i] := 0;
+            pairing_values_method2[i] := 0;
+            
+            for j in [1..rank] do
+                pairing_values_method1[i] := pairing_values_method1[i] + 
+                    sum_method1_weight[j] * coweight_of_stable_inHa[i][j];
+                pairing_values_method2[i] := pairing_values_method2[i] + 
+                    sum_method2_weight[j] * coweight_of_stable_inHa[i][j];
+            od;
+        od;
+    fi;
+
+    if stab_cartan_dim > 0 then
+        for i in [1..stab_cartan_dim] do
+            pairing_values_method1_coroot[i] := 0;
+            pairing_values_method2_coroot[i] := 0;
+            
+            for j in [1..rank] do
+                pairing_values_method1_coroot[i] := pairing_values_method1_coroot[i] + 
+                    sum_method1_weight[j] * t_cartan_coords[i][j];
+                pairing_values_method2_coroot[i] := pairing_values_method2_coroot[i] + 
+                    sum_method2_weight[j] * t_cartan_coords[i][j];
+            od;
+        od;
+    fi;
+    
+    sum_method1_simple_str := FormatRootExpression(sum_method1_simple, "α", rank);
+    sum_method2_simple_str := FormatRootExpression(sum_method2_simple, "α", rank);
+    sum_method1_weight_str := FormatRootExpression(sum_method1_weight, "ω", rank);
+    sum_method2_weight_str := FormatRootExpression(sum_method2_weight, "ω", rank);
+    
+    Print("\n=== Root Sum Results ===\n");
+    Print("\nMethod 1 root sum (k≥1 - p≥2):\n");
+    Print("  In simple root basis: ", sum_method1_simple_str, "    ");
+    Print("  Simple basis vector: ", sum_method1_simple, "\n");
+    Print("  In weight basis: ", sum_method1_weight_str, "     ");
+    Print("  Weight basis vector: ", sum_method1_weight, "\n");
+    
+    Print("\nMethod 2 root sum (k≥2 - p≥1):\n");
+    Print("  In simple root basis: ", sum_method2_simple_str, "     ");
+    Print("  Simple basis vector: ", sum_method2_simple, "\n");
+    Print("  In weight basis: ", sum_method2_weight_str, "     ");
+    Print("  Weight basis vector: ", sum_method2_weight, "\n");
+    
+    Print("\nPairing values with stabilizer coweight basis:\n");
+    Print("  Method 1: ", pairing_values_method1, "     ");
+    Print("  Method 2: ", pairing_values_method2, "\n");
+
+    Print("\nPairing values with stabilizer coroot basis:\n");
+    Print("  Method 1: ", pairing_values_method1_coroot, "     ");
+    Print("  Method 2: ", pairing_values_method2_coroot, "\n");
+    
+    return rec(
+        method1_roots_k := method1_roots_k,
+        method1_roots_p := method1_roots_p,
+        method2_roots_k := method2_roots_k,
+        method2_roots_p := method2_roots_p,
+        
+        sum_method1_simple := sum_method1_simple,
+        sum_method1_weight := sum_method1_weight,
+        sum_method2_simple := sum_method2_simple,
+        sum_method2_weight := sum_method2_weight,
+        
+        sum_method1_simple_str := sum_method1_simple_str,
+        sum_method1_weight_str := sum_method1_weight_str,
+        sum_method2_simple_str := sum_method2_simple_str,
+        sum_method2_weight_str := sum_method2_weight_str,
+        
+        pairing_values_method1 := pairing_values_method1,
+        pairing_values_method2 := pairing_values_method2,
+        pairing_values_method1_coroot := pairing_values_method1_coroot,
+        pairing_values_method2_coroot := pairing_values_method2_coroot,
+        
+        k_root_count := Length(k_roots),
+        p_root_count := Length(p_roots),
+        method1_k_count := Length(method1_roots_k),
+        method1_p_count := Length(method1_roots_p),
+        method2_k_count := Length(method2_roots_k),
+        method2_p_count := Length(method2_roots_p)
+    );
+end;
+
+# Helper2: function for linear expressions
+BuildLinearExpression := function(coeffs, params)
+    local result, i;
+    result := "";
+    for i in [1..Length(coeffs)] do
+        if coeffs[i] <> 0 then
+            if result <> "" then
+                Append(result, " + ");
+            fi;
+            Append(result, String(coeffs[i]));
+            Append(result, "*");
+            Append(result, params[i]);
+        fi;
+    od;
+    if result = "" then
+        return "0";
+    else
+        return result;
+    fi;
+end;
+
+# 11. Compute dert_x using root sums pair of coweight lattice
+ComputeDertXFromRootSums := function(root_sums, stab_cartan_basis, stab_cartan_dim)
+    local t_params, coeffs_method1, coeffs_method2, dert_x_result1, dert_x_result2, coeffs_method1_coroot, coeffs_method2_coroot, dert_x_result1_coroot, dert_x_result2_coroot,
+          all_even_method1, all_even_method2, all_even_method1_coroot, all_even_method2_coroot, 
+          is_admissible, i, is_caculated, is_admissible_coroot, is_caculated_coroot;
+    
+    Print("=== Computing dert_x from Root Sums ===\n");   
+    if stab_cartan_dim = 0 then
+        Print("Stabilizer Cartan subalgebra is zero-dimensional, dert_x = 0, x is admissible\n");
+        return rec(
+            dert_x_result2 := "0",
+            dert_x_result2 := "0",
+            dert_x_result1_coroot := "0",
+            dert_x_result2_coroot := "0",
+            is_admissible := true
+        );
+    fi;
+
+    #t1, t2, ..., t_d 
+    t_params := List([1..stab_cartan_dim], i -> Concatenation("t", String(i)));
+    
+    coeffs_method1 := root_sums.pairing_values_method1;
+    coeffs_method2 := root_sums.pairing_values_method2;
+    coeffs_method1_coroot := root_sums.pairing_values_method1_coroot;
+    coeffs_method2_coroot := root_sums.pairing_values_method2_coroot;
+    
+    dert_x_result1 := BuildLinearExpression(coeffs_method1, t_params);
+    dert_x_result2 := BuildLinearExpression(coeffs_method2, t_params);
+    dert_x_result1_coroot := BuildLinearExpression(coeffs_method1_coroot, t_params);
+    dert_x_result2_coroot := BuildLinearExpression(coeffs_method2_coroot, t_params);
+    
+    #check admissible of using coweight lattice
+    all_even_method1 := true;
+    for i in [1..stab_cartan_dim] do
+        if coeffs_method1[i] <> 0 then
+            if not IsInt(coeffs_method1[i]) or coeffs_method1[i] mod 2 <> 0 then
+                all_even_method1 := false;
+                break;
+            fi;
+        fi;
+    od;
+    
+    all_even_method2 := true;
+    for i in [1..stab_cartan_dim] do
+        if coeffs_method2[i] <> 0 then
+            if not IsInt(coeffs_method2[i]) or coeffs_method2[i] mod 2 <> 0 then
+                all_even_method2 := false;
+                break;
+            fi;
+        fi;
+    od;
+    is_caculated := coeffs_method1=coeffs_method2;
+    is_admissible := all_even_method1 and all_even_method2 and is_caculated;
+
+    #check admissible of using coroot lattice
+    all_even_method1_coroot := true;
+    for i in [1..stab_cartan_dim] do
+        if coeffs_method1_coroot[i] <> 0 then
+            if not IsInt(coeffs_method1_coroot[i]) or coeffs_method1_coroot[i] mod 2 <> 0 then
+                all_even_method1_coroot := false;
+                break;
+            fi;
+        fi;
+    od;
+    
+    all_even_method2_coroot := true;
+    for i in [1..stab_cartan_dim] do
+        if coeffs_method2_coroot[i] <> 0 then
+            if not IsInt(coeffs_method2_coroot[i]) or coeffs_method2_coroot[i] mod 2 <> 0 then
+                all_even_method2_coroot := false;
+                break;
+            fi;
+        fi;
+    od;
+    is_caculated_coroot := coeffs_method1_coroot=coeffs_method2_coroot;
+    is_admissible_coroot := all_even_method1_coroot and all_even_method2_coroot and is_caculated_coroot;
+
+
+    
+    Print("\n=== dert_x Results Using Coweight Lattice ===\n");
+    Print("dert_x method1 (k≥1 - p≥2): ", dert_x_result1, "     ");
+    Print("dert_x method2 (k≥2 - p≥1): ", dert_x_result2, "\n");
+    Print("e is admissible: ", is_admissible, "\n");
+    Print("Coefficients method1: ", coeffs_method1, "     ");
+    Print("Coefficients method2: ", coeffs_method2, "\n");
+
+    Print("\n=== dert_x Results Using Coroot Lattice ===\n");
+    Print("dert_x method1 (k≥1 - p≥2): ", dert_x_result1_coroot, "     ");
+    Print("dert_x method2 (k≥2 - p≥1): ", dert_x_result2_coroot, "\n");
+    Print("e is admissible: ", is_admissible_coroot, "\n");
+    Print("Coefficients method1: ", coeffs_method1_coroot, "     ");
+    Print("Coefficients method2: ", coeffs_method2_coroot, "\n");
+    
+    return rec(
+        dert_x_result1 := dert_x_result1,
+        dert_x_result2 := dert_x_result2,
+        is_admissible := is_admissible,
+        coeffs_method1 := coeffs_method1,
+        coeffs_method2 := coeffs_method2,
+        dert_x_result1_coroot := dert_x_result1_coroot,
+        dert_x_result2_coroot := dert_x_result2_coroot,
+        is_admissible_coroot := is_admissible_coroot,
+        coeffs_method1_coroot := coeffs_method1_coroot,
+        coeffs_method2_coroot := coeffs_method2_coroot,
+        stab_cartan_dim_used := stab_cartan_dim,
+        method1_k_count := root_sums.method1_k_count,
+        method1_p_count := root_sums.method1_p_count,
+        method2_k_count := root_sums.method2_k_count,
+        method2_p_count := root_sums.method2_p_count
+    );
+end;
+
+
+# Main function
+ADM := function(type, rank, theta_choice, orbit_index)
+    local aut_orbit_result, root_info, cartan_result, toral_result, even_result, 
+          triple_labels_result, root_distribution, stabilizer_result, coweight_lattice_k, 
+          subalgebra_info, root_sums, dert_x_result, summary;
+    
+    Print("\n=============================================");
+    Print("\n =======ADMISSIBLE CALCULATION SUMMARY=======\n");
+    Print("Type: ", type, "       Rank: ", rank, "\n");
+    Print("Automorphism choice: ", theta_choice, ",      Orbit index: ", orbit_index, "\n");
+
+    
+    # 1. Orbits and Automorphisms
+    aut_orbit_result := GetAutomorphismAndOrbit(type, rank, theta_choice, orbit_index);
+    if aut_orbit_result = fail then 
+        Print("Failed to get automorphism and orbit\n");
+        return fail;
+    fi;
+    
+    # 2. Root Coroot Weight Coweight
+    root_info:= BuildStandardRootSystem(aut_orbit_result.L, rank, type, orbit_index);
+    
+    # 3. Cartan decomposition
+    cartan_result := ComputeCartanDecomposition(aut_orbit_result.L, aut_orbit_result.theta);
+    
+    # 4. Torals of k
+    toral_result := ComputeToralSubalgebra(aut_orbit_result.L, cartan_result.k_space,
+                                         cartan_result.k_basis, root_info.cartanL);
+    if toral_result = fail then
+        Print("Failed to compute toral subalgebra\n");
+        return fail;
+    fi;
+    
+    # 5. lables of orb
+    triple_labels_result := ComputeTripleLabels(aut_orbit_result.x, aut_orbit_result.L,
+                                              root_info.cartanL, root_info.simple_roots,
+                                              cartan_result.k_space, cartan_result.k_basis,
+                                              toral_result.toral_subalgebra_basis, type, theta_choice);
+
+    #check even orb
+    even_result := TestEvenOrbits(triple_labels_result,rank);
+
+    if even_result.is_even_orbit then
+        Print("The orbit is even, e is admissible\n");
+        return fail;
+    else
+        # 6. Root space distribution and analysis of α_i(x)
+        root_distribution := AnalyzeRootSpaceDistribution(aut_orbit_result.L, aut_orbit_result.x,
+                                                        aut_orbit_result.theta, cartan_result.k_space, 
+                                                        cartan_result.p_space, root_info,
+                                                        triple_labels_result.L_label_parts);
+        
+        # 7.Stab CSA
+        stabilizer_result := ComputeStabilizer(aut_orbit_result.L, aut_orbit_result.x,
+                                            aut_orbit_result.e, aut_orbit_result.f,
+                                            cartan_result.k_space, cartan_result.p_space,
+                                            cartan_result.dim_k, cartan_result.dim_p, rank);
+        if stabilizer_result.stab_dim = 0 then
+            Print("Stabilizer dimension is zero, e is Noticed thus is admissible\n");
+            subalgebra_info := rec(toral_dim := 0,
+                                    cartan_coords := [],
+                                    t_simple_coords := [],
+                                    t_weight_coords := [],
+                                    rank := rank,
+                                    weight_matrix := root_info.weight_matrix,
+                                    cartan_matrix := root_info.cartan_matrix
+                                    );
+            return fail;
+        else
+        
+            # 8. ompute subalgebra weight coordinates for stabilizer Cartan
+            subalgebra_info := ComputeSubalgebraWeightCoordinates(aut_orbit_result.L, root_info,
+                                                                stabilizer_result.stab_cartan_basis,
+                                                                stabilizer_result.stab_cartan_dim, type, rank, theta_choice);
+            
+
+            #9. coweight of stab
+            if stabilizer_result.stab_cartan_dim > 0 then
+                coweight_lattice_k := ComputeCoweightLattice(aut_orbit_result.L, aut_orbit_result.x,
+                                                            aut_orbit_result.e, aut_orbit_result.f,
+                                                            cartan_result.k_space, cartan_result.p_space,
+                                                            cartan_result.dim_k, cartan_result.dim_p, root_info,
+                                                            stabilizer_result.stab_cartan_basis,
+                                                            stabilizer_result.stab_cartan_dim,stabilizer_result.stab_dim, subalgebra_info, type, rank, theta_choice);
+            else
+                coweight_lattice_k := "0";
+            fi;
+            
+            # 10. Sum of ad
+            root_sums := ComputeRootSums(root_distribution, root_info,
+                                        stabilizer_result.stab_cartan_dim,
+                                        subalgebra_info, coweight_lattice_k,stabilizer_result);
+
+            # 11.dert_x
+            dert_x_result := ComputeDertXFromRootSums(root_sums,
+                                                    stabilizer_result.stab_cartan_basis,
+                                                    stabilizer_result.stab_cartan_dim);
+        fi;
+    fi;
+    
+    Print("\nFINAL RESULTS SUMMARY\n");
+    Print("Lie algebra type: ", type, "\n");
+    Print("Rank: ", rank, "\n");
+    Print("x=", aut_orbit_result.x, "     e=", aut_orbit_result.e, "     f=", aut_orbit_result.f, "\n");
+    Print("x coordinates in L's Cartan basis: ", triple_labels_result.x_cartan_coords, "\n");
+    Print("Labels of L:", JoinStringsWithSeparator(List(triple_labels_result.L_label_parts,String),""), "\n");
+    Print("Labels of k:", JoinStringsWithSeparator(List(triple_labels_result.k_label_parts,String),""), "\n");
+    Print("Stabilizer dimension: ", stabilizer_result.stab_dim, "     ");
+    Print("Stabilizer Cartan subalgebra dimension: ", stabilizer_result.stab_cartan_dim, "\n");
+    Print("Stabilizer Cartan subalgebra basis: ", stabilizer_result.stab_cartan_basis, "\n");
+    Print("Stabilizer coweight coordinates(based in coroot): ", coweight_lattice_k.coweight_matrix_instable, "\n");
+    Print("dert_x method 1(coweight): ", dert_x_result.dert_x_result1, "\n");
+    Print("dert_x method 2(coweight): ", dert_x_result.dert_x_result2, "\n");
+    Print("e is admissible(coweight): ", dert_x_result.is_admissible, "\n");
+    Print("dert_x method 1(coroot): ", dert_x_result.dert_x_result1_coroot, "\n");
+    Print("dert_x method 2(coroot): ", dert_x_result.dert_x_result2_coroot, "\n");
+    Print("e is admissible(coroot): ", dert_x_result.is_admissible_coroot, "\n");
+    Print("\nRoot sum details:\n");
+    Print("  Method 1 (k≥1 - p≥2): ", root_sums.sum_method1_weight_str, "=",root_sums.sum_method1_simple_str," \n");
+    Print("  Method 2 (k≥2 - p≥1): ", root_sums.sum_method2_weight_str, "=",root_sums.sum_method2_simple_str," \n");
+
+    summary := rec(
+        type := type,
+        rank := rank,
+        theta_choice := theta_choice,
+        orbit_index := orbit_index,
+        L_label:= triple_labels_result.L_label_parts,
+        k_label:= triple_labels_result.k_label_parts,
+        stabilizer := stabilizer_result.stabilizer,
+        dert_x_result1 := dert_x_result.dert_x_result1,
+        dert_x_result2 := dert_x_result.dert_x_result2,
+        is_admissible := dert_x_result.is_admissible,
+        k_toral_subalgebra_dim := toral_result.toral_subalgebra_dim,
+        stabilizer_dim := stabilizer_result.stab_dim,
+        #aut_orbit_result := aut_orbit_result,
+        #root_info := root_info,
+        #cartan_result := cartan_result,
+        #toral_result := toral_result,
+        #even_result := even_result,
+        #triple_labels_result := triple_labels_result,
+        #root_distribution := root_distribution,
+        #stabilizer_result := stabilizer_result,
+        #subalgebra_info := subalgebra_info,
+        #root_sums := root_sums,
+        #coweight_lattice_k := coweight_lattice_k,
+        #dert_x_result := dert_x_result,
+        #stabilizer_cartan_dim := stabilizer_result.stab_cartan_dim
+    );       
+    return summary;
+end;
